@@ -86,48 +86,78 @@ export async function verifyEmail(req, res) {
 }
 
 export async function loginUser(req, res) {
-    const { email, password } = req.body;
+    try {
+        const { email, password } = req.body;
 
-    const user = await userModel.findOne({ email });
+        console.log("LOGIN BODY:", req.body);
 
-    if (!user) {
-        return res.status(404).json({
+        // 1️⃣ Find user
+        const user = await userModel.findOne({ email });
+
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                message: "User not found"
+            });
+        }
+
+        // 2️⃣ Check email verification BEFORE login
+        if (!user.verified) {
+            return res.status(403).json({
+                success: false,
+                message: "Please verify your email before logging in"
+            });
+        }
+
+        // 3️⃣ Check password
+        const isPasswordValid = await user.comparePassword(password);
+
+        if (!isPasswordValid) {
+            return res.status(401).json({
+                success: false,
+                message: "Invalid email or password"
+            });
+        }
+
+        // 4️⃣ Generate JWT only after verification + password check
+        const token = jwt.sign(
+            {
+                id: user._id
+            },
+            process.env.JWT_SECRET,
+            {
+                expiresIn: "7d"
+            }
+        );
+
+        // 5️⃣ Store token in cookie
+        res.cookie("token", token, {
+            httpOnly: true,
+            secure: false,
+            sameSite: "lax",
+            maxAge: 7 * 24 * 60 * 60 * 1000
+        });
+
+        // 6️⃣ Send successful response
+        return res.status(200).json({
+            success: true,
+            message: "User logged in successfully",
+            user: {
+                _id: user._id,
+                username: user.username,
+                email: user.email,
+                verified: user.verified
+            }
+        });
+
+    } catch (error) {
+        console.error("LOGIN ERROR:", error);
+
+        return res.status(500).json({
             success: false,
-            message: "User not found"
+            message: "Internal server error"
         });
     }
-
-    if(!user.verified) {
-        return res.status(400).json({
-            success: false,
-            message: "Please verify your email before logging in"
-        });
-    }
-
-
-    const isPasswordValid = await user.comparePassword(password);
-    if (!isPasswordValid) {
-        return res.status(400).json({
-            success: false,
-            message: "Invalid password"
-        });
-    }
-
-    const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: "7d" });
-
-    res.cookie("token", token);
-
-    res.json({
-        success: true,
-        message: "User logged in successfully",
-        user: {
-            _id: user._id,
-            username: user.username,
-            email: user.email,
-            verified: user.verified,
-        },
-        token
-    });
 }
 
 export async function getMe(req, res) {
